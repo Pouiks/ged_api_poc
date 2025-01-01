@@ -1,95 +1,101 @@
-const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
 const { generateJWT } = require('../utils/jwtUtils');
 
 // Fonction pour générer un token et envoyer un email
 exports.generateToken = async (req, res) => {
-    const { opportunityId, Data } = req.body;
+  const { opportunityId, locataires } = req.body;
 
-    if (!opportunityId || !Data || !Array.isArray(Data)) {
-        return res.status(400).json({ error: "Toutes les données sont requises" });
+  if (!opportunityId || !Array.isArray(locataires)) {
+      return res.status(400).json({ error: "Toutes les données sont requises et doivent être au format attendu." });
+  }
+
+  try {
+      // Parcourir les locataires et leurs garants/représentants légaux
+      const updatedLocataires = locataires.map((locataire) => {
+          // Mise à jour des documents des garants
+          const updatedGarants = locataire.garants.map((garant) => {
+              if (!garant) return null; // Garant inexistant
+              const updatedDocuments = {};
+              Object.entries(garant.documents || {}).forEach(([docKey, docValue]) => {
+                  updatedDocuments[docKey] = docValue === null ? null : docValue;
+              });
+              return { ...garant, documents: updatedDocuments };
+          });
+
+          // Mise à jour des documents du représentant légal
+          const updatedRepresentantLegal = locataire.representantLegal ? {
+              documents: Object.entries(locataire.representantLegal.documents || {}).reduce((acc, [docKey, docValue]) => {
+                  acc[docKey] = docValue === null ? null : docValue;
+                  return acc;
+              }, {})
+          } : null;
+
+          // Retourner le locataire mis à jour
+          return {
+              ...locataire,
+              garants: updatedGarants,
+              representantLegal: updatedRepresentantLegal
+          };
+      });
+
+      // Générer le token avec les données mises à jour
+      const token = generateJWT({ opportunityId, locataires: updatedLocataires });
+
+      // Vérifiez que le token est bien généré
+      if (!token) {
+          console.error("Erreur lors de la génération du token");
+          return res.status(500).json({ error: "Erreur interne lors de la génération du token" });
+      }
+
+      // Créer l'URL avec le token
+      const portalUrl = process.env.PORTAL_URL;
+      const url = `${portalUrl}?token=${encodeURIComponent(token)}`;
+
+      console.log("URL générée :", url); // Log pour vérification
+      res.status(200).json({ message: "Lien généré avec succès", url });
+  } catch (error) {
+      console.error("Erreur interne lors de la génération du token :", error);
+      res.status(500).json({ error: "Erreur interne du serveur" });
+  }
+};
+
+
+
+exports.handleDocumentSubmission = (req, res) => {
+    const { opportunityId, locataires } = req.body;
+
+    if (!opportunityId || !Array.isArray(locataires)) {
+        console.log("Validation échouée : opportunityId ou locataires manquants ou incorrects.");
+        return res.status(400).json({ error: "Toutes les données sont requises et doivent être au format attendu." });
     }
 
     try {
-        // Parcourir chaque locataire et garant pour vérifier leur état
-        const updatedData = Data.map((locataire) => {
-            // Transformer chaque document en fonction de son état
-            const updatedLocataire = {};
-            Object.entries(locataire).forEach(([key, value]) => {
-                if (typeof value === "object" && value !== null) {
-                    updatedLocataire[key] = {};
-                    Object.entries(value).forEach(([docKey, docValue]) => {
-                        // Si le document est null, il doit être rempli
-                        updatedLocataire[key][docKey] = docValue === null ? null : docValue;
+        locataires.forEach((locataire) => {
+            locataire.garants.forEach((garant, index) => {
+                if (garant) {
+                    Object.entries(garant.documents || {}).forEach(([docKey, docValue]) => {
+                        if (docValue === null) {
+                            console.log(`Document requis manquant : ${docKey} pour le garant ${index + 1} du locataire ${locataire.profil}`);
+                        } else {
+                            console.log(`Document fourni : ${docKey} pour le garant ${index + 1} du locataire ${locataire.profil}`);
+                        }
                     });
-                } else {
-                    updatedLocataire[key] = value;
                 }
             });
-            return updatedLocataire;
+
+            if (locataire.representantLegal) {
+                Object.entries(locataire.representantLegal.documents || {}).forEach(([docKey, docValue]) => {
+                    if (docValue === null) {
+                        console.log(`Document requis manquant : ${docKey} pour le représentant légal du locataire ${locataire.profil}`);
+                    } else {
+                        console.log(`Document fourni : ${docKey} pour le représentant légal du locataire ${locataire.profil}`);
+                    }
+                });
+            }
         });
 
-        // Générer le token avec les données mises à jour
-        const token = generateJWT({ opportunityId, Data: updatedData });
-
-        // Créer l'URL avec le token
-        const url = `${process.env.PORTAL_URL}?token=${encodeURIComponent(token)}`;
-
-        console.log(url); // Afficher l'URL dans la console
-
-        res.status(200).json({ message: "Lien envoyé avec succès", url });
+        res.status(200).json({ message: "Données traitées avec succès" });
     } catch (error) {
-        console.error(error);
+        console.error("Erreur lors du traitement des données :", error);
         res.status(500).json({ error: "Erreur interne du serveur" });
     }
 };
-
-exports.handleDocumentSubmission = (req, res) => {
-    const { opportunityId, Data } = req.body;
-  
-    if (!opportunityId || !Data) {
-        console.log("Vérification échouée : opportunityId ou Data manquant.");
-        return res.status(400).json({ error: "Toutes les données sont requises" });
-    }
-  
-    try {
-      Data.forEach((locataire) => {
-        Object.entries(locataire).forEach(([key, value]) => {
-          if (typeof value === "object" && value !== null) {
-            Object.entries(value).forEach(([docKey, docValue]) => {
-              if (docValue === null) {
-                console.log(`Document requis non fourni : ${docKey} pour ${key}`);
-              } else {
-                console.log(`Document déjà fourni : ${docKey} pour ${key}`);
-              }
-            });
-          }
-        });
-      });
-  
-      res.status(200).json({ message: "Données traitées avec succès" });
-    } catch (error) {
-      console.error("Erreur lors du traitement :", error);
-      res.status(500).json({ error: "Erreur interne du serveur" });
-    }
-  };
-  
-// Fonction pour envoyer l'email
-async function sendEmail(recipient, url) {
-    const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS,
-        },
-    });
-
-    const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: recipient,
-        subject: 'Accédez à votre espace de dépôt de documents',
-        html: `<p>Veuillez cliquer sur le lien suivant pour accéder à votre espace sécurisé :</p><a href="${url}">${url}</a>`,
-    };
-
-    await transporter.sendMail(mailOptions);
-}
