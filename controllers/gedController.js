@@ -1,64 +1,86 @@
-const { generateJWT } = require('../utils/jwtUtils');
+const { generateJWT } = require("../utils/jwtUtils");
+const { sendEmail } = require("../utils/emailService");
 
 // Fonction pour générer un token et envoyer un email
 exports.generateToken = async (req, res) => {
-  const { opportunityId, locataires } = req.body;
+  const { opportunityId, email, locataires } = req.body;
 
-  if (!opportunityId || !Array.isArray(locataires)) {
-      return res.status(400).json({ error: "Toutes les données sont requises et doivent être au format attendu." });
+  if (!opportunityId || !email || !Array.isArray(locataires)) {
+    console.error(
+      "Données manquantes : opportunityId, email ou locataires mal formatés."
+    );
+    return res.status(400).json({
+      error: "Toutes les données (opportunityId, email, locataires) sont requises et doivent être au format attendu.",
+    });
   }
 
   try {
-      // Parcourir les locataires et leurs garants/représentants légaux
-      const updatedLocataires = locataires.map((locataire) => {
-          // Mise à jour des documents des garants
-          const updatedGarants = locataire.garants.map((garant) => {
-              if (!garant) return null; // Garant inexistant
-              const updatedDocuments = {};
-              Object.entries(garant.documents || {}).forEach(([docKey, docValue]) => {
-                  updatedDocuments[docKey] = docValue === null ? null : docValue;
-              });
-              return { ...garant, documents: updatedDocuments };
-          });
-
-          // Mise à jour des documents du représentant légal
-          const updatedRepresentantLegal = locataire.representantLegal ? {
-              documents: Object.entries(locataire.representantLegal.documents || {}).reduce((acc, [docKey, docValue]) => {
-                  acc[docKey] = docValue === null ? null : docValue;
-                  return acc;
-              }, {})
-          } : null;
-
-          // Retourner le locataire mis à jour
-          return {
-              ...locataire,
-              garants: updatedGarants,
-              representantLegal: updatedRepresentantLegal
-          };
+    // Mise à jour des locataires et documents
+    const updatedLocataires = locataires.map((locataire) => {
+      const updatedGarants = locataire.garants.map((garant) => {
+        if (!garant) return null;
+        const updatedDocuments = {};
+        Object.entries(garant.documents || {}).forEach(([docKey, docValue]) => {
+          updatedDocuments[docKey] = docValue === null ? null : docValue;
+        });
+        return { ...garant, documents: updatedDocuments };
       });
 
-      // Générer le token avec les données mises à jour
-      const token = generateJWT({ opportunityId, locataires: updatedLocataires });
+      const updatedRepresentantLegal = locataire.representantLegal
+        ? {
+            documents: Object.entries(locataire.representantLegal.documents || {}).reduce(
+              (acc, [docKey, docValue]) => {
+                acc[docKey] = docValue === null ? null : docValue;
+                return acc;
+              },
+              {}
+            ),
+          }
+        : null;
 
-      // Vérifiez que le token est bien généré
-      if (!token) {
-          console.error("Erreur lors de la génération du token");
-          return res.status(500).json({ error: "Erreur interne lors de la génération du token" });
-      }
+      return {
+        ...locataire,
+        garants: updatedGarants,
+        representantLegal: updatedRepresentantLegal,
+      };
+    });
 
-      // Créer l'URL avec le token
-      const portalUrl = process.env.PORTAL_URL;
-      const url = `${portalUrl}?token=${encodeURIComponent(token)}`;
+    // Générer le token avec les données mises à jour
+    const token = generateJWT({ opportunityId, locataires: updatedLocataires });
 
-      console.log("URL générée :", url); // Log pour vérification
-      res.status(200).json({ message: "Lien généré avec succès", url });
+    if (!token) {
+      console.error("Erreur lors de la génération du token");
+      return res.status(500).json({
+        error: "Erreur interne lors de la génération du token",
+      });
+    }
+
+    // Générer l'URL avec le token
+    const portalUrl = process.env.PORTAL_URL;
+    const link = `${portalUrl}?token=${encodeURIComponent(token)}`;
+    console.log("Lien généré avec succès :", link);
+
+    // Envoyer l'email via Mailjet
+    try {
+      await sendEmail(email, link);
+      console.log(`Email envoyé avec succès à ${email}`);
+    } catch (emailError) {
+      console.error("Erreur lors de l'envoi de l'email :", emailError);
+      return res.status(500).json({
+        error: "Le lien a été généré mais une erreur est survenue lors de l'envoi de l'email.",
+      });
+    }
+
+    // Réponse réussie
+    res.status(200).json({
+      message: "Lien généré avec succès et email envoyé.",
+      url: link,
+    });
   } catch (error) {
-      console.error("Erreur interne lors de la génération du token :", error);
-      res.status(500).json({ error: "Erreur interne du serveur" });
+    console.error("Erreur interne lors de la génération du token :", error);
+    res.status(500).json({ error: "Erreur interne du serveur" });
   }
 };
-
-
 
 exports.handleDocumentSubmission = (req, res) => {
     const { opportunityId, locataires } = req.body;
@@ -74,7 +96,9 @@ exports.handleDocumentSubmission = (req, res) => {
                 if (garant) {
                     Object.entries(garant.documents || {}).forEach(([docKey, docValue]) => {
                         if (docValue === null) {
-                            console.log(`Document requis manquant : ${docKey} pour le garant ${index + 1} du locataire ${locataire.profil}`);
+                            console.log(
+                                `Document requis manquant : ${docKey} pour le garant ${index + 1} du locataire ${locataire.profil}`
+                            );
                         } else {
                             console.log(`Document fourni : ${docKey} pour le garant ${index + 1} du locataire ${locataire.profil}`);
                         }
@@ -85,7 +109,9 @@ exports.handleDocumentSubmission = (req, res) => {
             if (locataire.representantLegal) {
                 Object.entries(locataire.representantLegal.documents || {}).forEach(([docKey, docValue]) => {
                     if (docValue === null) {
-                        console.log(`Document requis manquant : ${docKey} pour le représentant légal du locataire ${locataire.profil}`);
+                        console.log(
+                            `Document requis manquant : ${docKey} pour le représentant légal du locataire ${locataire.profil}`
+                        );
                     } else {
                         console.log(`Document fourni : ${docKey} pour le représentant légal du locataire ${locataire.profil}`);
                     }

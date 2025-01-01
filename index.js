@@ -13,11 +13,12 @@ app.use((req, res, next) => {
     next();
 });
 console.log("PORTAL_URL chargé depuis .env :", process.env.PORTAL_URL);
+
 // Routes
 const gedRoutes = require("./routes/gedRoutes");
 app.use("/api/ged", gedRoutes);
 
 // Démarrer le serveur
 app.listen(PORT, () => {
-  console.log(`API GED en cours d'exécution sur http://localhost:${PORT}`);
+    console.log(`API GED en cours d'exécution sur http://localhost:${PORT}`);
 });
