@@ -1,6 +1,4 @@
-const mailjet = require("node-mailjet");
-
-const mailjetClient = mailjet.apiConnect(
+const mailjet = require("node-mailjet").apiConnect(
   process.env.MAILJET_API_KEY,
   process.env.MAILJET_API_SECRET
 );
@@ -8,32 +6,33 @@ const mailjetClient = mailjet.apiConnect(
 exports.sendEmail = async (email, link) => {
   console.log("Tentative d'envoi de mail...");
   try {
-    const request = mailjetClient.post("send", { version: "v3.1" }).request({
+    const request = mailjet.post("send", { version: "v3.1" }).request({
       Messages: [
         {
           From: {
-            Email: process.env.EMAIL_USER, // Email expéditeur (configuré dans .env)
-            Name: "Uxco group", // Nom de l'expéditeur
+            Email: process.env.EMAIL_USER,
+            Name: "Uxco group",
           },
           To: [
             {
-              Email: email, // Email destinataire
+              Email: email,
             },
           ],
-          TemplateID: 6602291, // Remplacez par l'ID de votre template Mailjet existant
-          TemplateLanguage: true, // Utilise les variables définies dans le template
-          Subject: "Finalisez votre dossier de réservation pour votre appartement", // Sujet de l'email
+          TemplateID: 6602291,
+          TemplateLanguage: true,
+          Subject: "Finalisez votre dossier de réservation pour votre appartement",
           Variables: {
-            link: link, // Lien généré pour déposer les documents
+            link, // Assurez-vous que "link" est correctement passé ici
           },
         },
       ],
     });
 
     const response = await request;
-    console.log(`Email envoyé avec succès à ${email}:`, response.body);
+    console.log("Réponse de Mailjet :", JSON.stringify(response.body, null, 2));
+    return response;
   } catch (error) {
-    console.error(`Erreur lors de l'envoi de l'email à ${email}:`, error);
-    throw error; // Relance l'erreur pour gestion par l'appelant
+    console.error("Erreur lors de l'envoi de l'email :", error.message || error);
+    throw error;
   }
 };
